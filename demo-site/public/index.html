@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acme Shoes — Home</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <strong>Acme Shoes</strong>
+      <nav><a href="/">Home</a><a href="/about">About</a><a href="/app">Store (SPA)</a><a href="/double">Double tag</a></nav>
+    </header>
+    <main>
+      <section class="hero">
+        <h1 id="headline">Shoes for every step</h1>
+        <p>This is a demo customer website with intentionally hostile CSS. The review widget must look right anyway, and must not change this page.</p>
+        <button id="site-button" type="button">Shop now</button>
+      </section>
+      <div class="grid">
+        <article class="product"><h3>Runner</h3><p>$89</p></article>
+        <article class="product"><h3>Trail</h3><p>$119</p></article>
+        <article class="product"><h3>Classic</h3><p>$69</p></article>
+      </div>
+      <p style="height: 900px">Scroll down…</p>
+      <p id="footer-text">End of page.</p>
+    </main>
+    <div class="fixed-promo">Free shipping over $50</div>
+
+    <!-- Website Review widget (copied from Admin → Websites → Embed script) -->
+    <script src="{{WIDGET_SRC}}" data-site-id="{{SITE_ID}}" async></script>
+  </body>
+</html>

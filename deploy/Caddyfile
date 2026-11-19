@@ -1,0 +1,15 @@
+# Caddy: automatic HTTPS (Let's Encrypt), HTTP→HTTPS redirect, WebSockets, compression.
+{$DOMAIN} {
+	encode zstd gzip
+	# API, Socket.IO (/socket.io), widget (/widget.js, /widget-app/*) and the dashboard: one origin.
+	reverse_proxy app:4000 {
+		header_up X-Request-Id {http.request.uuid}
+	}
+	request_body {
+		max_size 12MB
+	}
+	log {
+		output stdout
+		format json
+	}
+}

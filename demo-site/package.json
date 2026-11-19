@@ -1,0 +1,10 @@
+{
+  "name": "@wrtm/demo-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Separate demo customer website for testing the embeddable review widget.",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "website-review-task-management",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Website Review & Task Management SaaS Platform (frontend + backend + embeddable review widget)",
+  "packageManager": "pnpm@10.12.3",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @wrtm/backend --filter @wrtm/frontend --filter @wrtm/widget dev",
+    "dev:backend": "pnpm --filter @wrtm/backend dev",
+    "dev:frontend": "pnpm --filter @wrtm/frontend dev",
+    "build": "pnpm --filter @wrtm/widget build && pnpm --filter @wrtm/backend build && pnpm --filter @wrtm/frontend build",
+    "test": "pnpm --filter @wrtm/backend test",
+    "test:e2e": "pnpm --filter @wrtm/frontend test:e2e",
+    "typecheck": "pnpm -r typecheck",
+    "db:migrate": "pnpm --filter @wrtm/backend db:migrate",
+    "db:deploy": "pnpm --filter @wrtm/backend db:deploy",
+    "db:seed": "pnpm --filter @wrtm/backend db:seed",
+    "dev:widget": "pnpm --filter @wrtm/widget dev",
+    "demo": "node demo-site/server.mjs"
+  }
+}

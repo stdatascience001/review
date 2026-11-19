@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acme Shoes — Double install</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Installed once in <head> (e.g. by a WordPress plugin)… -->
+    <script src="{{WIDGET_SRC}}" data-site-id="{{SITE_ID}}" async></script>
+  </head>
+  <body>
+    <main>
+      <h1>Double installation</h1>
+      <p>The snippet is on this page three times. Only one widget may appear.</p>
+    </main>
+    <!-- …and again in the footer (e.g. by a theme), plus a second copy. -->
+    <script src="{{WIDGET_SRC}}" data-site-id="{{SITE_ID}}" async></script>
+    <script src="{{WIDGET_SRC}}?v=2" data-site-id="{{SITE_ID}}" async></script>
+  </body>
+</html>

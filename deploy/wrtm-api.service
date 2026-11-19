@@ -1,0 +1,29 @@
+# systemd unit for running the built app without Docker.
+#   sudo cp deploy/wrtm-api.service /etc/systemd/system/ && sudo systemctl enable --now wrtm-api
+[Unit]
+Description=Website Review & Task Management (API + dashboard + widget)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wrtm
+Group=wrtm
+WorkingDirectory=/opt/wrtm/backend
+EnvironmentFile=/opt/wrtm/backend/.env.production
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=5
+# Graceful shutdown (server closes sockets and DB connections on SIGTERM)
+KillSignal=SIGTERM
+TimeoutStopSec=15
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/wrtm
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

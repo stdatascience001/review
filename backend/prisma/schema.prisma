@@ -1,0 +1,518 @@
+// Website Review & Task Management — database schema
+// Tenant boundary: a Website. Every project, task, comment, attachment and activity
+// row is reachable from exactly one Website, and access is always checked through
+// WebsiteMember / ProjectMember.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum UserRole {
+  USER
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+// Team roles inside a website (tenant). SUPER_ADMIN is the platform-level UserRole.
+enum WebsiteRole {
+  OWNER
+  ADMIN
+  PROJECT_MANAGER
+  DEVELOPER
+  WEBSITE_USER
+}
+
+enum WebsiteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProjectRole {
+  MANAGER
+  CONTRIBUTOR
+  REVIEWER
+  VIEWER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+// Workflow: OPEN → IN_PROGRESS → IN_REVIEW ("Under review") → COMPLETED; REOPENED after
+// completion; ARCHIVED hides a task (restoring puts back the status it had before).
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  IN_REVIEW
+  COMPLETED
+  REOPENED
+  ARCHIVED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskType {
+  BUG
+  UI_ISSUE
+  FEATURE // "Feature request"
+  IMPROVEMENT
+  OTHER
+}
+
+enum AttachmentKind {
+  SCREENSHOT
+  FILE
+}
+
+enum TaskActivityType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  STARTED
+  COMPLETED
+  REOPENED
+  ARCHIVED
+  RESTORED
+  PRIORITY_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  COMMENTED
+  COMMENT_EDITED
+  COMMENT_DELETED
+  ATTACHMENT_ADDED
+  ATTACHMENT_REMOVED
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_STATUS_CHANGED
+  TASK_COMMENTED
+  WEBSITE_MEMBER_ADDED
+  PROJECT_MEMBER_ADDED
+  SYSTEM
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id                  String     @id @default(uuid()) @db.Uuid
+  email               String     @unique @db.VarChar(320) // always stored lower-cased
+  passwordHash        String?    @map("password_hash") // null for Google-only accounts
+  name                String     @db.VarChar(120)
+  avatarUrl           String?    @map("avatar_url") @db.VarChar(2048)
+  googleId            String?    @unique @map("google_id") @db.VarChar(64)
+  role                UserRole   @default(USER)
+  status              UserStatus @default(ACTIVE)
+  emailVerifiedAt     DateTime?  @map("email_verified_at")
+  failedLoginAttempts Int        @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?  @map("locked_until")
+  passwordChangedAt   DateTime?  @map("password_changed_at")
+  lastLoginAt         DateTime?  @map("last_login_at")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+
+  sessions             UserSession[]
+  authTokens           AuthToken[]
+  ownedWebsites        Website[]           @relation("WebsiteOwner")
+  websiteMemberships   WebsiteMember[]     @relation("WebsiteMemberUser")
+  websiteInvitesSent   WebsiteMember[]     @relation("WebsiteMemberInviter")
+  invitationsSent      WebsiteInvitation[]
+  projectMemberships   ProjectMember[]
+  projectsCreated      Project[]           @relation("ProjectCreator")
+  tasksCreated         Task[]              @relation("TaskCreator")
+  tasksAssigned        Task[]              @relation("TaskAssignee")
+  comments             TaskComment[]
+  attachments          TaskAttachment[]
+  activities           TaskActivity[]
+  taskReads            TaskRead[]
+  notifications        Notification[]      @relation("NotificationRecipient")
+  notificationsTrigger Notification[]      @relation("NotificationActor")
+
+  @@index([status])
+  @@map("users")
+}
+
+model UserSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash") @db.Char(64) // SHA-256 hex
+  userAgent        String?   @map("user_agent") @db.VarChar(512)
+  ipAddress        String?   @map("ip_address") @db.VarChar(64)
+  authMethod       String    @default("password") @map("auth_method") @db.VarChar(20)
+  // Set for review-widget sessions: the session (and its tokens) only work for this website.
+  websiteId        String?   @map("website_id") @db.Uuid
+  expiresAt        DateTime  @map("expires_at")
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([websiteId])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+// Single-use, hashed tokens for email verification and password reset.
+model AuthToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      AuthTokenType
+  tokenHash String        @unique @map("token_hash") @db.Char(64) // SHA-256 hex
+  expiresAt DateTime      @map("expires_at")
+  usedAt    DateTime?     @map("used_at")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+// ───────────────────────────── Tenancy ─────────────────────────────
+
+model Website {
+  id                String        @id @default(uuid()) @db.Uuid
+  name              String        @db.VarChar(120)
+  slug              String        @unique @db.VarChar(140)
+  url               String        @db.VarChar(2048)
+  description       String?       @db.VarChar(2000)
+  logoUrl           String?       @map("logo_url") @db.VarChar(2048)
+  status            WebsiteStatus @default(ACTIVE)
+  // Public identifier used by the embed script (safe to expose; not a secret).
+  siteId            String        @unique @map("site_id") @db.VarChar(40)
+  // Token the site owner places in a <meta> tag to prove domain ownership.
+  verificationToken String        @map("verification_token") @db.VarChar(64)
+  domainVerifiedAt  DateTime?     @map("domain_verified_at")
+  ownerId           String        @map("owner_id") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  owner          User                @relation("WebsiteOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members        WebsiteMember[]
+  settings       WebsiteSettings?
+  invitations    WebsiteInvitation[]
+  projects       Project[]
+  tasks          Task[]
+  notifications  Notification[]
+  widgetSessions UserSession[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("websites")
+}
+
+model WebsiteMember {
+  id          String      @id @default(uuid()) @db.Uuid
+  websiteId   String      @map("website_id") @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
+  role        WebsiteRole @default(DEVELOPER)
+  invitedById String?     @map("invited_by_id") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  user      User    @relation("WebsiteMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User?   @relation("WebsiteMemberInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([websiteId, userId])
+  @@index([userId])
+  @@map("website_members")
+}
+
+// Pending invitation for someone (usually without an account yet) to join a website.
+model WebsiteInvitation {
+  id          String      @id @default(uuid()) @db.Uuid
+  websiteId   String      @map("website_id") @db.Uuid
+  email       String      @db.VarChar(320)
+  role        WebsiteRole
+  // Projects to add the member to on acceptance.
+  projectIds  String[]    @default([]) @map("project_ids") @db.Uuid
+  tokenHash   String      @unique @map("token_hash") @db.Char(64)
+  invitedById String?     @map("invited_by_id") @db.Uuid
+  expiresAt   DateTime    @map("expires_at")
+  acceptedAt  DateTime?   @map("accepted_at")
+  revokedAt   DateTime?   @map("revoked_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  invitedBy User?   @relation(fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, email])
+  @@index([email])
+  @@map("website_invitations")
+}
+
+model WebsiteSettings {
+  id                    String       @id @default(uuid()) @db.Uuid
+  websiteId             String       @unique @map("website_id") @db.Uuid
+  timezone              String       @default("UTC") @db.VarChar(64)
+  defaultTaskPriority   TaskPriority @default(MEDIUM) @map("default_task_priority")
+  clientsCanCreateTasks Boolean      @default(true) @map("clients_can_create_tasks")
+  emailNotifications    Boolean      @default(true) @map("email_notifications")
+  allowedDomains        String[]     @default([]) @map("allowed_domains") @db.VarChar(255)
+  brandColor            String?      @map("brand_color") @db.VarChar(7)
+  // Review widget: on/off, and the project new widget feedback goes to by default.
+  widgetEnabled         Boolean      @default(true) @map("widget_enabled")
+  widgetProjectId       String?      @map("widget_project_id") @db.Uuid
+  // People who sign in through this website's widget join it automatically as Website Users
+  // (and its feedback project). Off: only invited members can review.
+  widgetAutoJoin        Boolean      @default(true) @map("widget_auto_join")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+
+  website       Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  widgetProject Project? @relation(fields: [widgetProjectId], references: [id], onDelete: SetNull)
+
+  @@map("website_settings")
+}
+
+// ───────────────────────────── Projects ─────────────────────────────
+
+model Project {
+  id          String        @id @default(uuid()) @db.Uuid
+  websiteId   String        @map("website_id") @db.Uuid
+  name        String        @db.VarChar(120)
+  description String?       @db.VarChar(5000)
+  status      ProjectStatus @default(ACTIVE)
+  createdById String?       @map("created_by_id") @db.Uuid
+  startDate   DateTime?     @map("start_date") @db.Date
+  dueDate     DateTime?     @map("due_date") @db.Date
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  website          Website           @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  createdBy        User?             @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  members          ProjectMember[]
+  tasks            Task[]
+  widgetDefaultFor WebsiteSettings[]
+
+  @@unique([websiteId, name])
+  @@index([websiteId, status])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid()) @db.Uuid
+  projectId String      @map("project_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  role      ProjectRole @default(CONTRIBUTOR)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+// ───────────────────────────── Tasks ─────────────────────────────
+
+model Task {
+  id          String       @id @default(uuid()) @db.Uuid
+  // Human-friendly unique Task ID, shown as "TASK-<number>".
+  number      Int          @unique @default(autoincrement())
+  // websiteId is denormalised from Project so tenant-scoped queries never need a join.
+  websiteId   String       @map("website_id") @db.Uuid
+  projectId   String       @map("project_id") @db.Uuid
+  title       String       @db.VarChar(255)
+  description String?      @db.Text
+  status      TaskStatus   @default(OPEN)
+  priority    TaskPriority @default(MEDIUM)
+  type        TaskType     @default(OTHER)
+  // Website-review context: page the feedback refers to + capture metadata
+  // (viewport, browser, element selector, pin coordinates…).
+  pageUrl     String?      @map("page_url") @db.VarChar(2048)
+  metadata    Json?
+  position    Int          @default(0)
+  creatorId   String?      @map("creator_id") @db.Uuid
+  assigneeId  String?      @map("assignee_id") @db.Uuid
+  dueDate     DateTime?    @map("due_date")
+  completedAt DateTime?    @map("completed_at")
+  // When the task was archived (status ARCHIVED).
+  archivedAt  DateTime?    @map("archived_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  website       Website          @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator       User?            @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  assignee      User?            @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  comments      TaskComment[]
+  attachments   TaskAttachment[]
+  activities    TaskActivity[]
+  notifications Notification[]
+  reads         TaskRead[]
+
+  @@index([projectId, status, position])
+  @@index([websiteId, status])
+  @@index([assigneeId, status])
+  @@index([creatorId])
+  @@index([dueDate])
+  @@index([websiteId, archivedAt])
+  @@index([websiteId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([completedAt])
+  @@map("tasks")
+}
+
+model TaskComment {
+  id        String    @id @default(uuid()) @db.Uuid
+  taskId    String    @map("task_id") @db.Uuid
+  authorId  String?   @map("author_id") @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
+  body      String    @db.Text
+  editedAt  DateTime? @map("edited_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  task        Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author      User?            @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  parent      TaskComment?     @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     TaskComment[]    @relation("CommentThread")
+  attachments TaskAttachment[]
+
+  @@index([taskId, createdAt])
+  @@index([parentId])
+  @@index([authorId])
+  @@map("task_comments")
+}
+
+model TaskAttachment {
+  id         String         @id @default(uuid()) @db.Uuid
+  taskId     String         @map("task_id") @db.Uuid
+  commentId  String?        @map("comment_id") @db.Uuid
+  uploaderId String?        @map("uploader_id") @db.Uuid
+  kind       AttachmentKind @default(FILE)
+  fileName   String         @map("file_name") @db.VarChar(255)
+  mimeType   String         @map("mime_type") @db.VarChar(127)
+  sizeBytes  Int            @map("size_bytes")
+  storageKey String         @unique @map("storage_key") @db.VarChar(1024)
+  url        String?        @db.VarChar(2048)
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  task     Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  comment  TaskComment? @relation(fields: [commentId], references: [id], onDelete: SetNull)
+  uploader User?        @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+  @@index([commentId])
+  @@map("task_attachments")
+}
+
+model TaskActivity {
+  id            String           @id @default(uuid()) @db.Uuid
+  taskId        String           @map("task_id") @db.Uuid
+  actorId       String?          @map("actor_id") @db.Uuid
+  type          TaskActivityType
+  // Single-field actions also store the field and its previous/new value explicitly.
+  field         String?          @db.VarChar(40)
+  previousValue String?          @map("previous_value") @db.Text
+  newValue      String?          @map("new_value") @db.Text
+  // e.g. { "status": { "from": "OPEN", "to": "IN_PROGRESS" } }
+  changes       Json?
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, createdAt])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("task_activities")
+}
+
+// ───────────────────────────── Notifications ─────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  actorId   String?          @map("actor_id") @db.Uuid
+  websiteId String?          @map("website_id") @db.Uuid
+  taskId    String?          @map("task_id") @db.Uuid
+  type      NotificationType
+  title     String           @db.VarChar(255)
+  body      String?          @db.VarChar(2000)
+  data      Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user    User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor   User?    @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([websiteId])
+  @@index([taskId])
+  @@map("notifications")
+}
+
+// Per-user "last seen" marker for a task's comments (unread indicators).
+model TaskRead {
+  taskId     String   @map("task_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  lastReadAt DateTime @default(now()) @map("last_read_at")
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+  @@index([userId])
+  @@map("task_reads")
+}
+
+// Security audit trail (logins, failures, permission changes, deletions…). Append-only, and
+// deliberately without foreign keys so entries survive deletion of users and websites.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  action     String   @db.VarChar(64) // e.g. auth.login, auth.login_failed, website.deleted
+  outcome    String   @default("success") @db.VarChar(16) // success | failure | denied
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorEmail String?  @map("actor_email") @db.VarChar(320)
+  websiteId  String?  @map("website_id") @db.Uuid
+  targetType String?  @map("target_type") @db.VarChar(32)
+  targetId   String?  @map("target_id") @db.VarChar(64)
+  statusCode Int?     @map("status_code")
+  ipAddress  String?  @map("ip_address") @db.VarChar(64)
+  userAgent  String?  @map("user_agent") @db.VarChar(512)
+  requestId  String?  @map("request_id") @db.VarChar(64)
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([websiteId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

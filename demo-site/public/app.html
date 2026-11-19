@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Store</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!--
+      Single-page app with client-side routing (history.pushState), like React Router,
+      Next.js or Astro view transitions. The widget is added from JavaScript after the
+      app renders, the way a React useEffect or Next.js <Script> would add it.
+    -->
+    <header class="site-header">
+      <strong>Acme Store (SPA)</strong>
+      <nav id="spa-nav">
+        <a href="/app" data-route>Catalog</a>
+        <a href="/app/cart" data-route>Cart</a>
+        <a href="/app/checkout" data-route>Checkout</a>
+        <a href="/">Leave SPA</a>
+      </nav>
+    </header>
+    <main id="view"></main>
+
+    <script>
+      const routes = {
+        '/app': ['Catalog', 'Browse our catalog.'],
+        '/app/cart': ['Cart', 'Your cart is empty.'],
+        '/app/checkout': ['Checkout', 'Enter your shipping details.'],
+      };
+      const render = () => {
+        const [title, text] = routes[location.pathname] ?? ['Not found', ''];
+        document.title = `Store — ${title}`;
+        document.getElementById('view').innerHTML = `<h1 id="route-title">${title}</h1><p>${text}</p>`;
+      };
+      document.getElementById('spa-nav').addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-route]');
+        if (!a) return;
+        e.preventDefault();
+        history.pushState({}, '', a.getAttribute('href'));
+        render();
+      });
+      window.addEventListener('popstate', render);
+      render();
+
+      // "useEffect" — install the widget once, after the app mounted.
+      const s = document.createElement('script');
+      s.src = '{{WIDGET_SRC}}';
+      s.async = true;
+      s.dataset.siteId = '{{SITE_ID}}';
+      document.body.appendChild(s);
+    </script>
+  </body>
+</html>

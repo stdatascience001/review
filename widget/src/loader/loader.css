@@ -1,0 +1,135 @@
+/* Floating Review button. Lives in the widget's shadow root: host-page CSS can't reach it,
+   and nothing here can affect the host page. Pixel units only (host "rem" may be anything). */
+:host {
+  /* Shadow-root !important beats any host-page rule targeting this element. */
+  all: initial !important;
+  display: block !important;
+  position: fixed !important;
+  z-index: 2147483000 !important; /* own stacking context, above the site's overlays */
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  visibility: visible !important;
+}
+/* hidden while the panel takes a screenshot of the page */
+:host([data-capturing]) {
+  visibility: hidden !important;
+}
+/* "Add a Comment" element picking: the button steps aside */
+:host([data-picking]) .fab,
+:host([data-picking]) .fab-nudge {
+  display: none !important;
+}
+
+.fab {
+  all: initial;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--wrtm-brand, #4f46e5);
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.35), 0 4px 10px -6px rgba(15, 23, 42, 0.3);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.fab:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+.fab:active {
+  transform: translateY(0);
+}
+.fab:focus-visible {
+  outline: 3px solid #a5b4fc;
+  outline-offset: 3px;
+}
+.fab[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.85;
+}
+.fab svg {
+  flex: none;
+}
+.fab-badge {
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #fff;
+}
+.fab-badge[hidden] {
+  display: none;
+}
+
+.fab-nudge {
+  all: initial;
+  position: fixed;
+  right: 20px;
+  bottom: 76px;
+  box-sizing: border-box;
+  max-width: min(320px, calc(100vw - 40px));
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.35);
+  cursor: pointer;
+  animation: wrtm-nudge 0.2s ease-out;
+}
+.fab-nudge[hidden] {
+  display: none;
+}
+@keyframes wrtm-nudge {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (max-width: 640px) {
+  .fab {
+    right: 14px;
+    bottom: 14px;
+    height: 48px;
+    padding: 0 14px;
+  }
+  /* full-screen panel on phones: the button would sit on top of it */
+  :host([data-open]) .fab {
+    display: none;
+  }
+  .fab-nudge {
+    right: 14px;
+    bottom: 72px;
+  }
+}
+
+@media print {
+  .fab {
+    display: none;
+  }
+}
