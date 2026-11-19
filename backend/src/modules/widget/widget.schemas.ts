@@ -27,6 +27,9 @@ export const forgotPasswordBody = z.object({ siteId: siteIdSchema, email: emailS
 
 export const refreshBody = z.object({ siteId: siteIdSchema, refreshToken: z.string().min(20).max(200) });
 
+/** Dashboard → widget sign-in ticket (see widget.service reviewLink). */
+export const handoffBody = z.object({ siteId: siteIdSchema, ticket: z.string().regex(/^[A-Za-z0-9_-]{20,200}$/) });
+
 export const googleStartQuery = z.object({
   siteId: siteIdSchema,
   origin: z.string().url().max(300),

@@ -13,7 +13,8 @@ import { paginated, toSkipTake } from '../../lib/pagination';
 import { prisma } from '../../lib/prisma';
 import { signedFileUrl } from '../../lib/storage';
 import { writeAudit } from '../../lib/audit';
-import { accessibleTaskWhere, DEFAULT_PROJECT_ROLE, getWebsiteAccess, isWebsiteManager, projectCan } from '../access/access.service';
+import { accessibleTaskWhere, DEFAULT_PROJECT_ROLE, getTaskAccess, getWebsiteAccess, isWebsiteManager, projectCan } from '../access/access.service';
+import { issueWidgetHandoff } from '../auth/auth.service';
 import * as comments from '../comments/comments.service';
 import { ACTIVE_STATUSES, DONE_STATUSES, OPEN_STATUSES } from '../tasks/task-status';
 import * as tasks from '../tasks/tasks.service';
@@ -67,6 +68,46 @@ export const siteForOrigin = async (siteId: string, origin: string | undefined) 
 
 export const siteByIdForOrigin = async (websiteId: string, origin: string | undefined) =>
   assertUsable(await prisma.website.findUnique({ where: { id: websiteId }, select: siteSelect }), origin);
+
+/**
+ * Dashboard "Show on page": the task's page link (…?wrtm_task=<id>) plus, when that page is
+ * one where this website's widget runs, a single-use sign-in ticket, so the person arrives
+ * already signed in to the widget instead of being asked to log in again.
+ *
+ * The ticket is only ever put into links to the website's own allowed domains: a page URL
+ * pointing anywhere else (it is reported by the widget) gets the plain link, so a ticket can
+ * never be handed to a third-party site.
+ */
+export const reviewLink = async (userId: string, taskId: string) => {
+  await getTaskAccess(userId, taskId); // same visibility rules as opening the task in the dashboard
+  const task = await prisma.task.findUniqueOrThrow({
+    where: { id: taskId },
+    select: { pageUrl: true, website: { select: siteSelect } },
+  });
+  if (!task.pageUrl) throw badRequest('This task is not linked to a page', 'NO_PAGE_URL');
+  let url: URL;
+  try {
+    url = new URL(task.pageUrl);
+  } catch {
+    throw badRequest('This task is not linked to a valid page', 'NO_PAGE_URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw badRequest('This task is not linked to a valid page', 'NO_PAGE_URL');
+  url.searchParams.set('wrtm_task', taskId);
+
+  const site = task.website;
+  const widgetRuns =
+    site.status !== 'INACTIVE' &&
+    site.settings?.widgetEnabled !== false &&
+    isOriginAllowed(url.origin, site, site.settings?.allowedDomains ?? []);
+  if (!widgetRuns) return { url: url.href, signedIn: false };
+
+  const ticket = await issueWidgetHandoff(userId, site.id);
+  // In the fragment (never sent to the website's server or in Referer headers); pages that
+  // already use the fragment (hash routing) get it as a query parameter instead.
+  if (url.hash) url.searchParams.set('wrtm_ticket', ticket);
+  else url.hash = `wrtm_ticket=${ticket}`;
+  return { url: url.href, signedIn: true };
+};
 
 /** Public bootstrap data. Contains nothing that isn't already visible on the customer's page. */
 export const config = (site: WidgetSite) => ({

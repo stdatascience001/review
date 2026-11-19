@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { commentsApi, tasksApi, type TaskInput } from '@/api/resources';
@@ -788,6 +788,28 @@ export const TaskDetailView = ({ taskId, onDeleted, onLoaded }: { taskId: string
 };
 
 /** The page element a widget comment points at, with a link that opens it highlighted. */
+/**
+ * "Show on page" opens the website with the task highlighted. The website's review widget has
+ * its own sign-in, so a plain click first asks the API for the link with a one-time widget
+ * sign-in: the reviewer lands on the page already signed in (no second login). Middle-click,
+ * Ctrl/⌘-click and "copy link" keep using the plain link, which still works after signing in.
+ */
+const openSignedIn = (e: MouseEvent<HTMLAnchorElement>, taskId: string, plainHref: string) => {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  // Opened synchronously (inside the click) so popup blockers allow it; navigated once the link is ready.
+  const tab = window.open('', '_blank');
+  if (tab) tab.opener = null;
+  const go = (url: string) => {
+    if (tab && !tab.closed) tab.location.href = url;
+    else window.open(url, '_blank', 'noopener');
+  };
+  tasksApi.reviewLink(taskId).then(
+    ({ url }) => go(url),
+    () => go(plainHref),
+  );
+};
+
 const ElementAnchorRow = ({ taskId, pageUrl, element }: { taskId: string; pageUrl: string; element: unknown }) => {
   const el = element as { tag?: unknown; text?: unknown } | null | undefined;
   if (!el || typeof el.tag !== 'string') return null;
@@ -803,7 +825,7 @@ const ElementAnchorRow = ({ taskId, pageUrl, element }: { taskId: string; pageUr
     <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-testid="task-element">
       <span className="shrink-0 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{el.tag.toUpperCase()}</span>
       <span className="min-w-0 flex-1 truncate text-slate-700">{typeof el.text === 'string' && el.text ? el.text : '(no text)'}</span>
-      <a href={href} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-700 hover:underline">
+      <a href={href} target="_blank" rel="noreferrer" onClick={(e) => openSignedIn(e, taskId, href)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-700 hover:underline">
         Show on page <ExternalLink className="h-3.5 w-3.5" />
       </a>
     </div>

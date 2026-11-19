@@ -17,7 +17,7 @@ export interface IssuedSession {
 const sessionExpiry = () => new Date(Date.now() + env.SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
 
 /** Creates a server-side session (refresh token stored hashed) and a short-lived access JWT. */
-export type AuthMethod = 'password' | 'google' | 'widget-password' | 'widget-google';
+export type AuthMethod = 'password' | 'google' | 'widget-password' | 'widget-google' | 'widget-handoff';
 
 /**
  * A session with `websiteId` set is a review-widget session: its access tokens use the

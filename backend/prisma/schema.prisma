@@ -27,6 +27,8 @@ enum UserStatus {
 enum AuthTokenType {
   EMAIL_VERIFICATION
   PASSWORD_RESET
+  // Dashboard → review widget sign-in ("Show on page"): single-use, ~2 minutes, bound to one website.
+  WIDGET_HANDOFF
 }
 
 // Team roles inside a website (tenant). SUPER_ADMIN is the platform-level UserRole.

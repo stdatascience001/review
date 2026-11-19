@@ -118,6 +118,13 @@ export const widgetRoutes = (authLimiter: RequestHandler) => {
     });
   });
 
+  /** Arriving from the dashboard's "Show on page": swaps the link's single-use ticket for a session. */
+  r.post('/auth/handoff', authLimiter, validate({ body: s.handoffBody }), audit('auth.widget_handoff', { meta: (req) => ({ channel: 'widget', siteId: req.body.siteId }) }), async (req, res) => {
+    const { siteId, ticket } = bodyOf(req, s.handoffBody);
+    const found = await widget.siteForOrigin(siteId, req.get('origin'));
+    sendSession(res, 200, await auth.redeemWidgetHandoff(ticket, found.id, clientMeta(req)));
+  });
+
   r.post('/auth/logout', async (req, res) => {
     const header = req.get('authorization');
     const payload = header?.startsWith('Bearer ') ? verifyWidgetToken(header.slice(7).trim()) : null;

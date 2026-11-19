@@ -10,7 +10,7 @@
  *  - renders only the floating Review button + badge, inside a Shadow DOM (no CSS leaks either way);
  *  - lazy-loads the React panel (widget-app/…) on first hover/focus/click.
  */
-import { createApi, type WidgetApi } from '../shared/api';
+import { createApi, type Session, type WidgetApi } from '../shared/api';
 import type { Me, MountContext, MountedWidget, PageInfo, WidgetConfig } from '../shared/types';
 import loaderCss from './loader.css?inline';
 
@@ -71,9 +71,50 @@ const init = () => {
   });
 };
 
+/**
+ * Links from the dashboard ("Show on page") carry a single-use sign-in ticket in the fragment
+ * (#wrtm_ticket=…, or ?wrtm_ticket=… on hash-routed pages). It is removed from the address bar
+ * straight away, whatever happens next.
+ */
+const TICKET = /^[A-Za-z0-9_-]{20,200}$/;
+const takeTicket = (): string | null => {
+  try {
+    const u = new URL(location.href);
+    let ticket = u.searchParams.get('wrtm_ticket');
+    if (ticket !== null) u.searchParams.delete('wrtm_ticket');
+    const m = /^#wrtm_ticket=([^&]*)$/.exec(u.hash);
+    if (m) {
+      ticket = ticket ?? m[1]!;
+      u.hash = '';
+    }
+    if (ticket === null) return null;
+    history.replaceState(history.state, '', u.href);
+    return TICKET.test(ticket) ? ticket : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Signs in with the dashboard's ticket (replacing any other widget session in this browser). */
+const redeemTicket = async (api: WidgetApi, ticket: string) => {
+  try {
+    const res = await api.request<{ session: Session }>('/auth/handoff', {
+      method: 'POST',
+      auth: false,
+      body: { siteId: api.siteId, ticket },
+    });
+    api.setSession(res.session);
+  } catch {
+    // Expired or already used (e.g. the page was reloaded): the normal sign-in is offered.
+    console.warn(`${LOG} the sign-in link from the dashboard has expired; please sign in.`);
+  }
+};
+
 const boot = async (api: WidgetApi, appUrl: string) => {
+  const ticket = takeTicket();
   // Verifies the Site ID and that this domain is allowed. Nothing is added to the page otherwise.
   const config = await api.request<WidgetConfig>(`/config?siteId=${encodeURIComponent(api.siteId)}`, { auth: false });
+  if (ticket) await redeemTicket(api, ticket);
 
   const host = document.createElement('wrtm-review-widget');
   // Positioning lives in the shadow :host rule (it outranks any host-page CSS).

@@ -640,3 +640,52 @@ test('element comments: page-wise list, Show on page across pages, after a refre
   await highlight.getByRole('button', { name: 'Dismiss highlight' }).click();
   void aboutId;
 });
+
+test('Super Admin: dashboard "Show on page" opens the page already signed in (no second login), task + screenshot visible', async ({ browser }) => {
+  const { SUPER_ADMIN } = await import('./env');
+  // The element comment from the test above, plus a screenshot on it.
+  const found = await api.get('/api/v1/tasks', { params: { search: 'Footer text is outdated' } }).then((r) => r.json());
+  const taskId = found.data.items[0].id as string;
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const up = await api.post(`/api/v1/tasks/${taskId}/attachments?kind=screenshot`, {
+    data: PNG,
+    headers: { 'Content-Type': 'image/png', 'X-File-Name': 'footer-issue.png' },
+  });
+  expect(up.status()).toBe(201);
+
+  // A fresh browser: signed in to the dashboard only, never to the widget on the website.
+  const ctx = await newContext(browser);
+  try {
+    const dash = await ctx.newPage();
+    await login(dash, SUPER_ADMIN.email, SUPER_ADMIN.password);
+    await dash.goto(`/tasks?task=${taskId}`);
+    const link = dash.getByTestId('task-element').getByRole('link', { name: 'Show on page' });
+    await expect(link).toHaveAttribute('href', new RegExp(`wrtm_task=${taskId}$`)); // plain link (copy / middle-click)
+
+    const [page] = await Promise.all([ctx.waitForEvent('page'), link.click()]);
+    await page.waitForURL(`${DEMO_URL}/**`);
+    const highlight = page.getByTestId('element-highlight');
+    await expect(highlight).toBeVisible();
+    await expect(page.locator('#footer-text')).toBeInViewport();
+    await expect(authDialog(page)).toHaveCount(0); // no login asked
+    // The one-time sign-in and the task id are removed from the address bar.
+    expect(page.url()).not.toContain('wrtm_ticket');
+    expect(page.url()).not.toContain('wrtm_task');
+
+    // Review straight away: details, element and screenshot.
+    await highlight.getByRole('button', { name: 'Open' }).click();
+    const p = panel(page);
+    await expect(p.getByTestId('detail-key')).toBeVisible();
+    await expect(p).toContainText('Footer text is outdated');
+    await expect(p.getByRole('img', { name: 'footer-issue.png' })).toBeVisible();
+    await expect(authDialog(page)).toHaveCount(0);
+
+    // Reloading keeps the widget session (the ticket itself was single-use).
+    await page.reload();
+    await openPanel(page).catch(() => undefined);
+    await expect(p.getByRole('button', { name: 'Sign in', exact: true })).toHaveCount(0);
+    await expect(p.getByRole('button', { name: 'Add a Comment' })).toBeEnabled();
+  } finally {
+    await ctx.close();
+  }
+});

@@ -1,10 +1,11 @@
 import express, { Router } from 'express';
 import { audit } from '../../lib/audit';
 import { env } from '../../config/env';
-import { authenticate, requireVerifiedEmail } from '../../middleware/authenticate';
-import { validate } from '../../middleware/validate';
+import { authenticate, authOf, requireVerifiedEmail } from '../../middleware/authenticate';
+import { paramsOf, validate } from '../../middleware/validate';
 import * as comments from '../comments/comments.controller';
 import * as cs from '../comments/comments.schemas';
+import { reviewLink } from '../widget/widget.service';
 import * as c from './tasks.controller';
 import * as s from './tasks.schemas';
 
@@ -21,6 +22,10 @@ export const tasksRoutes = () => {
   r.get('/:taskId/assignees', validate({ params: s.taskIdParams }), c.assignees);
   r.post('/:taskId/restore', validate({ params: s.taskIdParams }), c.restore);
   r.post('/:taskId/read', validate({ params: s.taskIdParams }), c.markRead);
+  // "Show on page": the page link with a one-time widget sign-in (no second login on the website).
+  r.post('/:taskId/review-link', validate({ params: s.taskIdParams }), async (req, res) => {
+    res.json({ data: await reviewLink(authOf(req).userId, paramsOf(req, s.taskIdParams).taskId) });
+  });
   r.post(
     '/:taskId/attachments',
     validate({ params: s.taskIdParams, query: s.uploadQuery }),

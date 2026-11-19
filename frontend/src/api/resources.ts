@@ -150,6 +150,8 @@ export const tasksApi = {
       api.get('/tasks', { params: clean({ ...params, overdue: params.overdue ? 'true' : undefined }) }),
     ),
   get: (id: string) => unwrap<TaskDetail>(api.get(`/tasks/${id}`)),
+  /** Page link for "Show on page", with a one-time sign-in for the website's review widget. */
+  reviewLink: (id: string) => unwrap<{ url: string; signedIn: boolean }>(api.post(`/tasks/${id}/review-link`)),
   create: (body: TaskInput & { projectId: string }) => unwrap<Task>(api.post('/tasks', clean(body))),
   update: (id: string, body: Partial<TaskInput>) => unwrap<Task>(api.patch(`/tasks/${id}`, body)),
   remove: (id: string) => api.delete(`/tasks/${id}`),

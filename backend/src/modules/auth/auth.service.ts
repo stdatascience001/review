@@ -76,6 +76,52 @@ const consumeAuthToken = async (token: string, type: AuthTokenType) => {
   return record;
 };
 
+// ───────────────────────────── Dashboard → widget handoff ─────────────────────────────
+
+/**
+ * "Show on page" from the dashboard opens the customer's website, where the review widget has
+ * its own, site-bound sign-in (the dashboard cookie doesn't exist there). The dashboard asks
+ * for a ticket and passes it in the link; the widget swaps it for a widget session, so a
+ * signed-in team member lands on the page already signed in.
+ *
+ * Tickets are single-use, valid for 2 minutes, stored hashed, and bound to one website (the
+ * hash includes the website id, so a ticket can't be redeemed on another website's widget).
+ */
+const HANDOFF_TTL_MS = 2 * 60 * 1000;
+const handoffHash = (websiteId: string, ticket: string) => sha256(`widget-handoff:${websiteId}:${ticket}`);
+
+export const issueWidgetHandoff = async (userId: string, websiteId: string): Promise<string> => {
+  const ticket = generateToken(32);
+  await prisma.authToken.create({
+    data: {
+      userId,
+      type: AuthTokenType.WIDGET_HANDOFF,
+      tokenHash: handoffHash(websiteId, ticket),
+      expiresAt: new Date(Date.now() + HANDOFF_TTL_MS),
+    },
+  });
+  return ticket;
+};
+
+export const redeemWidgetHandoff = async (ticket: string, websiteId: string, meta: ClientMeta): Promise<AuthResult> => {
+  const tokenHash = handoffHash(websiteId, ticket);
+  const invalid = () => unauthorized('This link has expired. Open it again from the dashboard.', 'HANDOFF_INVALID');
+  // Atomic single use: only one request can flip usedAt.
+  const consumed = await prisma.authToken.updateMany({
+    where: { tokenHash, type: AuthTokenType.WIDGET_HANDOFF, usedAt: null, expiresAt: { gt: new Date() } },
+    data: { usedAt: new Date() },
+  });
+  if (consumed.count !== 1) throw invalid();
+  const record = await prisma.authToken.findUnique({ where: { tokenHash }, select: { userId: true } });
+  const user = record
+    ? await prisma.user.findUnique({ where: { id: record.userId }, select: { id: true, role: true, status: true } })
+    : null;
+  if (!user) throw invalid();
+  if (user.status !== 'ACTIVE') throw forbidden('Your account is suspended', 'ACCOUNT_SUSPENDED');
+  const session = await createSession(user, meta, 'widget-handoff', websiteId);
+  return { user: await loadProfile(user.id), session };
+};
+
 export const sendVerificationEmail = async (user: Pick<User, 'id' | 'email' | 'name'>) => {
   const token = await issueAuthToken(
     user.id,
